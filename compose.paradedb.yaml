@@ -1,0 +1,47 @@
+# 可选的生产覆盖（Postgres + ParadeDB：pgvector 向量 + pg_search 真 BM25 词法检索）：
+# docker compose -f compose.yaml -f compose.paradedb.yaml up -d --build
+#
+# 与 compose.postgres.yaml 的差别：
+# - 数据库镜像换成 paradedb/paradedb（自带 vector + pg_search 扩展）
+# - 向量 provider 切到 paradedb，解锁 multi_es_fast 检索策略（多路召回含 BM25 词法路）
+# - 中文 BM25 分词器由引擎按 SAG_SAG_LANGUAGE 自动选择（zh → jieba）
+services:
+  db:
+    image: paradedb/paradedb:latest-pg17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请先在 .env 中设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-sag}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/init-db-paradedb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sag} -d ${POSTGRES_DB:-sag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      args:
+        SAG_API_EXTRAS: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SAG_ENVIRONMENT: prod
+      SAG_DEBUG: "false"
+      SAG_SECRET_KEY: ${SAG_SECRET_KEY:?请先在 .env 中设置 SAG_SECRET_KEY}
+      SAG_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sag}:${POSTGRES_PASSWORD:?请先在 .env 中设置 POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sag}
+      SAG_DATA_DIR: /data/sag
+      SAG_SAG_VECTOR_PROVIDER: paradedb
+      SAG_SAG_RELATIONAL_PROVIDER: postgres
+      SAG_SAG_PG_HOST: db
+      SAG_SAG_PG_PORT: "5432"
+      SAG_SAG_PG_USER: ${POSTGRES_USER:-sag}
+      SAG_SAG_PG_PASSWORD: ${POSTGRES_PASSWORD:?请先在 .env 中设置 POSTGRES_PASSWORD}
+      SAG_SAG_PG_DATABASE: ${POSTGRES_DB:-sag}
+
+volumes:
+  pgdata:
