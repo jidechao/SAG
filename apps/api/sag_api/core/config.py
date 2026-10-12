@@ -141,7 +141,7 @@ class Settings(BaseSettings):
 
     # ── zleap-sag 后端选择 ─────────────────────────────────────────────
     # None → 零基础设施（LanceDB + 内置 SQLite，落在 data_dir）
-    sag_vector_provider: Literal["lancedb", "es", "pgvector", "oceanbase"] = "lancedb"
+    sag_vector_provider: Literal["lancedb", "es", "pgvector", "paradedb", "oceanbase"] = "lancedb"
     sag_relational_provider: Literal["sqlite", "postgres", "mysql", "oceanbase"] | None = None
     sag_language: Literal["zh", "en"] = "zh"
     # 所有平台均须显式确认重建。保留 windows_fresh 旧配置值，仅选择原地保留

@@ -314,6 +314,8 @@ class EngineManager:
         "lancedb": True,
         "es": True,
         "pgvector": False,
+        # ParadeDB = pgvector 向量 + pg_search 真 BM25，单库提供词法能力。
+        "paradedb": True,
         "oceanbase": False,
     }
 
@@ -415,7 +417,49 @@ class EngineManager:
                 layer=ErrorLayer.STORE,
                 stage=ErrorStage.PERSIST,
             ) from error
+        await self._ensure_pg_vector_contract_columns(engine)
         self._schema_ready = True
+
+    # pg 系向量后端（pgvector / paradedb）的合同列补齐。
+    # zleap 0.14.0 的 `_ensure_table` 用首篇文档合并合同建表，文档中为 None 的
+    # 合同字段（generation_id 等，首次摄取时恒为 None）会被跳过建列，导致
+    # multi / multi_es_fast 检索期的代际过滤触发 column does not exist。
+    # 此处幂等补齐（ADD COLUMN IF NOT EXISTS）；上游修复后自然退化为 no-op。
+    _PG_FAMILY_PROVIDERS = frozenset({"pgvector", "paradedb"})
+    _PG_VECTOR_CONTRACT_COLUMNS: dict[str, tuple[str, ...]] = {
+        "source_chunks": ("generation_id",),
+        "event_vectors_wide": (
+            "generation_id",
+            "conversation_id",
+            "parent_id",
+            "start_time",
+            "end_time",
+        ),
+        "event_entity_vectors": ("generation_id", "conversation_id", "parent_id"),
+    }
+
+    async def _ensure_pg_vector_contract_columns(self, engine: DataEngine) -> None:
+        """幂等补齐 pg 系向量表缺失的合同列；表不存在时跳过， ingest 后再次执行。"""
+        if self._settings.sag_vector_provider not in self._PG_FAMILY_PROVIDERS:
+            return
+        from sqlalchemy import text
+
+        try:
+            session_factory = engine.resources.relational.session_factory()
+            async with session_factory() as session:
+                for table, columns in self._PG_VECTOR_CONTRACT_COLUMNS.items():
+                    alters = ", ".join(
+                        f'ADD COLUMN IF NOT EXISTS "{column}" text' for column in columns
+                    )
+                    await session.execute(
+                        text(f'ALTER TABLE IF EXISTS "{table}" {alters}')
+                    )
+                await session.commit()
+        except Exception as error:  # noqa: BLE001 - best-effort 合同补齐
+            log.warning(
+                "向量表合同列补齐失败（将在下次机会重试） error_type=%s",
+                type(error).__name__,
+            )
 
     async def _ensure_source_config(
         self,
@@ -804,7 +848,7 @@ class EngineManager:
                     )
                     if self._settings.sag_relational_provider in (None, "sqlite"):
                         async with self._sqlite_document_mutation_lock:
-                            return await processor.process(
+                            outcome = await processor.process(
                                 path,
                                 checkpoint=effective_checkpoint,
                                 on_checkpoint=on_checkpoint or ignore_checkpoint,
@@ -813,15 +857,21 @@ class EngineManager:
                                 on_progress=on_progress,
                                 original_path=original_path,
                             )
-                    return await processor.process(
-                        path,
-                        checkpoint=effective_checkpoint,
-                        on_checkpoint=on_checkpoint or ignore_checkpoint,
-                        should_pause=effective_should_pause,
-                        on_stage=on_stage,
-                        on_progress=on_progress,
-                        original_path=original_path,
-                    )
+                    else:
+                        outcome = await processor.process(
+                            path,
+                            checkpoint=effective_checkpoint,
+                            on_checkpoint=on_checkpoint or ignore_checkpoint,
+                            should_pause=effective_should_pause,
+                            on_stage=on_stage,
+                            on_progress=on_progress,
+                            original_path=original_path,
+                        )
+                    # 向量表在首次摄取时才惰性建列；摄取后幂等补齐合同列，
+                    # 保证随后的检索不再触发缺列错误。
+                    if not outcome.paused:
+                        await self._ensure_pg_vector_contract_columns(engine)
+                    return outcome
             except _DocumentAdmissionYielded:
                 return paused_outcome()
 

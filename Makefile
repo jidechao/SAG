@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help dev api web install install-api install-web test build setup-dify release release-dry-run compose-config compose-up compose-ps compose-logs compose-down compose-up-postgres compose-down-postgres
+.PHONY: help dev api web install install-api install-web test build setup-dify release release-dry-run compose-config compose-up compose-ps compose-logs compose-down compose-up-postgres compose-down-postgres compose-up-paradedb compose-down-paradedb
 
 help: ## 显示可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -59,3 +59,9 @@ compose-up-postgres: ## 使用 Postgres + pgvector 覆盖启动（需先配置 .
 
 compose-down-postgres: ## 停止 Postgres 覆盖部署
 	docker compose -f compose.yaml -f compose.postgres.yaml down
+
+compose-up-paradedb: ## 使用 Postgres + ParadeDB 覆盖启动（向量 + 真 BM25 词法检索）
+	docker compose -f compose.yaml -f compose.paradedb.yaml up -d --build
+
+compose-down-paradedb: ## 停止 ParadeDB 覆盖部署
+	docker compose -f compose.yaml -f compose.paradedb.yaml down

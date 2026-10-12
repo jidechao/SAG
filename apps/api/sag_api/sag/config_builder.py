@@ -16,6 +16,7 @@ from zleap.sag.config import (
     LLMConfig,
     OceanBaseConnectionConfig,
     OceanBaseVectorConfig,
+    ParadeDBVectorConfig,
     PgVectorConfig,
     PostgresConnectionConfig,
     RelationalConfig,
@@ -31,7 +32,7 @@ _PLACEHOLDER = "not-configured"
 
 # SAG 的向量后端取值 → 0.8.2 的 VectorConfig 构造。lancedb 由 EngineConfig 从
 # data_dir 自动派生（vector=None），其余需显式连接配置。
-_VECTOR_PROVIDERS = frozenset({"lancedb", "es", "pgvector", "oceanbase"})
+_VECTOR_PROVIDERS = frozenset({"lancedb", "es", "pgvector", "paradedb", "oceanbase"})
 
 
 def _build_vector(settings: Settings) -> Any:
@@ -44,6 +45,17 @@ def _build_vector(settings: Settings) -> Any:
         return ElasticsearchVectorConfig(hosts=["http://localhost:9200"])
     if provider == "pgvector":
         return PgVectorConfig(
+            connection=PostgresConnectionConfig(
+                host=settings.sag_pg_host,
+                port=settings.sag_pg_port,
+                user=settings.sag_pg_user,
+                password=settings.sag_pg_password,
+                database=settings.sag_pg_database,
+            )
+        )
+    if provider == "paradedb":
+        # 连接形状与 pgvector 相同；差别只在 pg_search 扩展提供真 BM25 词法检索。
+        return ParadeDBVectorConfig(
             connection=PostgresConnectionConfig(
                 host=settings.sag_pg_host,
                 port=settings.sag_pg_port,

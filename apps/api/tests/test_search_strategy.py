@@ -554,6 +554,88 @@ def test_strategies_capability_report_marks_multi_es_disabled_on_pgvector(monkey
     assert ok_report["disabled"] == {}
 
 
+def test_strategies_capability_report_enables_multi_es_fast_on_paradedb(monkeypatch):
+    """paradedb 单库后端（pgvector 向量 + pg_search 真 BM25）必须解锁词法策略。"""
+    from sag_api.core.config import settings
+    from sag_api.sag.engine_manager import EngineManager
+
+    monkeypatch.setattr(settings, "sag_vector_provider", "paradedb")
+    report = EngineManager.strategies_capability_report(settings)
+
+    assert set(report["enabled"]) == {"vector", "multi", "multi_es_fast"}
+    assert report["disabled"] == {}
+
+
+def test_config_builder_constructs_paradedb_vector_config(monkeypatch):
+    """paradedb provider 经 config_builder 装配出 zleap 的 ParadeDBVectorConfig。"""
+    from zleap.sag.config import ParadeDBVectorConfig
+
+    from sag_api.core.config import settings
+    from sag_api.sag.config_builder import _build_vector
+
+    monkeypatch.setattr(settings, "sag_vector_provider", "paradedb")
+    monkeypatch.setattr(settings, "sag_pg_host", "db")
+    monkeypatch.setattr(settings, "sag_pg_port", 5432)
+
+    config = _build_vector(settings)
+
+    assert isinstance(config, ParadeDBVectorConfig)
+    assert config.provider == "paradedb"
+    assert config.connection.host == "db"
+    assert config.connection.port == 5432
+
+
+@pytest.mark.asyncio
+async def test_pg_vector_contract_columns_backfill(monkeypatch):
+    """pg 系 provider 幂等补齐向量表合同列（generation_id 等）；lancedb 完全跳过。
+
+    防回归：zleap 0.14.0 按首篇文档建列时会丢掉值为 None 的合同字段，
+    multi / multi_es_fast 的代际过滤随即触发 column does not exist。
+    """
+    from sag_api.core.config import settings
+    from sag_api.sag.engine_manager import EngineManager
+
+    statements: list[str] = []
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def execute(self, clause):
+            statements.append(str(clause))
+
+        async def commit(self):
+            return None
+
+    class _FakeRelational:
+        def session_factory(self):
+            return _FakeSession
+
+    class _FakeResources:
+        relational = _FakeRelational()
+
+    class _FakeEngine:
+        resources = _FakeResources()
+
+    manager = EngineManager(settings)
+
+    monkeypatch.setattr(settings, "sag_vector_provider", "lancedb")
+    await manager._ensure_pg_vector_contract_columns(_FakeEngine())
+    assert statements == []
+
+    monkeypatch.setattr(settings, "sag_vector_provider", "paradedb")
+    await manager._ensure_pg_vector_contract_columns(_FakeEngine())
+
+    joined = "\n".join(statements)
+    assert 'ALTER TABLE IF EXISTS "source_chunks"' in joined
+    assert 'ADD COLUMN IF NOT EXISTS "generation_id" text' in joined
+    assert 'ALTER TABLE IF EXISTS "event_vectors_wide"' in joined
+    assert 'ALTER TABLE IF EXISTS "event_entity_vectors"' in joined
+
+
 @pytest.mark.asyncio
 async def test_capabilities_endpoint_exposes_disabled_strategies(monkeypatch):
     """Web 端读的 /system/capabilities 必须把 disabled map 透传给前端灰置逻辑。"""
