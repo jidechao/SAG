@@ -46,8 +46,12 @@ apps/api/dist/desktop/
 .public-sync-reports/
 /output/
 
+# Vendored third-party source (local reference only)
+vendor/
+
 # skill installer output (npx skills add)
 .agents/
 docs/agentic-sag-introduction-related-work.md
 docs/architecture.md
 docs/assets/architecture/sag-runtime-architecture.svg
+.env.paradedb
