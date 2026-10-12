@@ -368,6 +368,7 @@ docker compose up -d --build       # 重建服务，不删除数据卷
 | Docker 默认 | SQLite | SQLite + LanceDB | Docker 数据卷 `sagdata` |
 | 本地开发 | SQLite | SQLite + LanceDB | `apps/api/.data/` |
 | PostgreSQL 覆盖 | PostgreSQL | PostgreSQL + pgvector | `pgdata` 与 `sagdata` 数据卷 |
+| ParadeDB 覆盖 | PostgreSQL | PostgreSQL + pgvector + pg_search（BM25） | `pgdata` 与 `sagdata` 数据卷 |
 
 `docker compose down` 会保留数据。**`docker compose down -v` 会永久删除数据库、知识索引和已上传文件。**
 
@@ -670,6 +671,21 @@ docker compose -f compose.yaml -f compose.postgres.yaml up -d --build
 ```
 
 服务器部署前应设置真实的 `SAG_CORS_ORIGINS` 与 `NEXT_PUBLIC_API_BASE`。升级前同时备份 `pgdata` 和 `sagdata`。
+
+### PostgreSQL/ParadeDB 部署（BM25 词法检索）
+
+裸 pgvector 没有真正的 BM25 词法检索，因此在 `compose.postgres.yaml` 部署下 `multi_es_fast` 检索策略（含词法路的多路召回）会被禁用。ParadeDB 覆盖将数据库镜像换成 [ParadeDB](https://www.paradedb.com/)（`paradedb/paradedb`），在 pgvector 之外内置基于 Tantivy 的 `pg_search` 扩展——同一个 PostgreSQL 同时提供向量与 BM25 词法检索，`multi_es_fast` 完整可用。`SAG_SAG_LANGUAGE=zh` 时中文自动使用 jieba 分词器。
+
+```bash
+cp .env.example .env
+openssl rand -hex 32   # 填入 SAG_SECRET_KEY
+openssl rand -hex 24   # 填入 POSTGRES_PASSWORD
+
+docker compose -f compose.yaml -f compose.paradedb.yaml config
+docker compose -f compose.yaml -f compose.paradedb.yaml up -d --build
+```
+
+该覆盖与 pgvector 覆盖使用相同的 `POSTGRES_*` 变量和 `pgdata` 数据卷约定。启动后可用 `GET /api/v1/system/capabilities` 验证：`multi_es_fast` 应出现在 `search_strategies` 中且 `search_strategies_disabled` 为空。
 
 ---
 

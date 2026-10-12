@@ -366,6 +366,7 @@ Default persistence:
 | Docker default | SQLite | SQLite + LanceDB | Docker volume `sagdata` |
 | Local development | SQLite | SQLite + LanceDB | `apps/api/.data/` |
 | PostgreSQL override | PostgreSQL | PostgreSQL + pgvector | `pgdata` and `sagdata` volumes |
+| ParadeDB override | PostgreSQL | PostgreSQL + pgvector + pg_search (BM25) | `pgdata` and `sagdata` volumes |
 
 `docker compose down` preserves data. **`docker compose down -v` permanently deletes the database, knowledge index, and uploaded files.**
 
@@ -668,6 +669,21 @@ docker compose -f compose.yaml -f compose.postgres.yaml up -d --build
 ```
 
 Set real `SAG_CORS_ORIGINS` and `NEXT_PUBLIC_API_BASE` values before server deployment. Back up both `pgdata` and `sagdata` before upgrades.
+
+### PostgreSQL/ParadeDB deployment (BM25 lexical search)
+
+Bare pgvector has no true BM25 lexical search, so the `multi_es_fast` retrieval strategy (multi-way recall including the lexical channel) is disabled under `compose.postgres.yaml`. The ParadeDB overlay swaps the database image for [ParadeDB](https://www.paradedb.com/) (`paradedb/paradedb`), which bundles pgvector with the Tantivy-based `pg_search` extension — one PostgreSQL serving both vector and BM25 lexical retrieval, with `multi_es_fast` fully enabled. Chinese text uses the jieba tokenizer automatically when `SAG_SAG_LANGUAGE=zh`.
+
+```bash
+cp .env.example .env
+openssl rand -hex 32   # set SAG_SECRET_KEY
+openssl rand -hex 24   # set POSTGRES_PASSWORD
+
+docker compose -f compose.yaml -f compose.paradedb.yaml config
+docker compose -f compose.yaml -f compose.paradedb.yaml up -d --build
+```
+
+The overlay uses the same `POSTGRES_*` variables and `pgdata` volume conventions as the pgvector override. Verify the capability after startup: `GET /api/v1/system/capabilities` should list `multi_es_fast` in `search_strategies` with an empty `search_strategies_disabled`.
 
 ---
 
