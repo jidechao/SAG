@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Shanghai"
     # NoDecode 让逗号分隔值先进入下方 validator，避免 settings 源强制按 JSON 解码。
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # 为 true 时放行任意来源（正则匹配并回显 Origin），适合内网/NAS 等封闭网络的自由访问。
+    cors_allow_all: bool = False
     # 关闭后仅允许首个用户注册（部署引导），其余返回 403
     allow_registration: bool = True
     # Dify 外部知识库调用的专用服务密钥；未配置时兼容端点拒绝服务。

@@ -98,8 +98,12 @@ def create_app() -> FastAPI:
         "allow_headers": ["*"],
         "expose_headers": ["X-Request-Id"],
     }
+    # SAG_CORS_ALLOW_ALL=true 时放行任意来源（内网/NAS 场景）；Starlette 按正则回显
+    # 实际 Origin，与 allow_credentials 兼容。
+    if settings.cors_allow_all:
+        cors_kwargs["allow_origin_regex"] = r"https?://.*"
     # 开发环境放行局域网前端（如 http://192.168.x.x:3000），避免本机 IP 访问时 CORS 拦截
-    if settings.environment == "dev":
+    elif settings.environment == "dev":
         cors_kwargs["allow_origin_regex"] = (
             r"https?://("
             r"localhost|"
